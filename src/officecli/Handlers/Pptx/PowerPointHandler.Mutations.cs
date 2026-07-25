@@ -1717,6 +1717,13 @@ public partial class PowerPointHandler
                 : new NotesSlide();
             // Link notes to the new slide
             newNotesPart.AddPart(newSlidePart);
+            // BUG(notes-orphan): the clone must also carry the source's
+            // notesMaster relationship. Its placeholders have an empty
+            // <p:spPr/> and inherit geometry from the master, so without this
+            // the duplicated notes text has no position or size anywhere in
+            // the package and conformant readers throw on the missing
+            // relationship — even though the deck itself has a valid master.
+            newNotesPart.AddPart(EnsureNotesMasterPart(presentationPart));
         }
 
         newSlidePart.Slide.Save();
