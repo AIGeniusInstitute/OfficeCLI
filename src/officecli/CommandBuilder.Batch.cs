@@ -301,6 +301,9 @@ static partial class CommandBuilder
             }
 
             var items = System.Text.Json.JsonSerializer.Deserialize<List<BatchItem>>(jsonText, BatchJsonContext.Default.ListBatchItem) ?? new();
+            // NEWLINE-SEMANTICS-V2: strip meta items; rewrite legacy (\n = soft
+            // break) docx dumps to the v2 encoding before execution.
+            OfficeCli.Core.BatchCompat.PrepareForReplay(items, file.FullName);
             // BUG-R40-B11: explicit null entries (e.g. `[null]`) deserialize
             // to a List<BatchItem> with a null slot and trip a NRE deeper in
             // ExecuteBatchItem. Reject up-front with a recognizable error

@@ -927,6 +927,11 @@ static partial class CommandBuilder
 
         switch (item.Command.ToLowerInvariant())
         {
+            // NEWLINE-SEMANTICS-V2: version-stamp items are normally stripped
+            // by BatchCompat.PrepareForReplay; tolerate one that reaches the
+            // executor (plugin NDJSON lines bypass the list-level prepare).
+            case "meta":
+                return "meta";
             case "get":
             {
                 var path = item.Path ?? "/";

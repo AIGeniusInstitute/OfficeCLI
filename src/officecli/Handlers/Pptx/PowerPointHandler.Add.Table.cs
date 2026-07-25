@@ -502,7 +502,7 @@ public partial class PowerPointHandler
 
                 // Cell text from property
                 var cellText = properties.GetValueOrDefault("text", "");
-                XmlTextValidator.ValidateOrThrow(cellText, "text");
+                XmlTextValidator.ValidateOrThrow(cellText, "text", allowSoftBreakChar: true);
 
                 // For each row, insert a new cell at the same column index
                 foreach (var row in colTable.Elements<Drawing.TableRow>())
@@ -577,7 +577,7 @@ public partial class PowerPointHandler
                 var cPara = new Drawing.Paragraph();
                 if (properties.TryGetValue("text", out var cText) && !string.IsNullOrEmpty(cText))
                 {
-                    XmlTextValidator.ValidateOrThrow(cText, "text");
+                    XmlTextValidator.ValidateOrThrow(cText, "text", allowSoftBreakChar: true);
                     cPara.Append(new Drawing.Run(
                         new Drawing.RunProperties { Language = "en-US" },
                         new Drawing.Text { Text = cText }));
