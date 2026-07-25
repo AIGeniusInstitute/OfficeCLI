@@ -1296,6 +1296,26 @@ static partial class CommandBuilder
                 dict[key] = value;
             }
         }
+
+        // NEWLINE-SEMANTICS-V2 + CONSISTENCY(text-escape-boundary): find /
+        // replace get the same C-escape convenience as text= (`--find '\v'
+        // --replace '\n'` works without shell $'..' quoting) — EXCEPT when
+        // the find is a regex (r"..." prefix or regex=true): regex has its
+        // own escape language (\\., \b, \d) that C-escape resolution would
+        // corrupt, so regex invocations are passed through verbatim, same
+        // stance as Word's wildcard mode. Post-pass here (not in the per-key
+        // loop) because the decision needs the regex key's value.
+        bool findIsRegex =
+            (dict.TryGetValue("regex", out var rxFlag) && OfficeCli.Core.ParseHelpers.IsTruthySafe(rxFlag))
+            || (dict.TryGetValue("find", out var fv)
+                && (fv.StartsWith("r\"", StringComparison.Ordinal) || fv.StartsWith("r'", StringComparison.Ordinal)));
+        if (!findIsRegex)
+        {
+            if (dict.TryGetValue("find", out var findVal))
+                dict["find"] = OfficeCli.Core.TextEscape.Resolve(findVal);
+            if (dict.TryGetValue("replace", out var replVal))
+                dict["replace"] = OfficeCli.Core.TextEscape.Resolve(replVal);
+        }
         return dict;
     }
 

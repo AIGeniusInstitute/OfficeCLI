@@ -16,8 +16,8 @@ namespace OfficeCli.Core;
 /// <c>\n</c> was always consumed by the second replace.
 ///
 /// <see cref="Resolve"/> does a single left-to-right scan that recognizes
-/// <c>\\</c> (literal backslash), <c>\n</c> (LF), <c>\t</c> (TAB), and
-/// <c>\r</c> (CR). Unknown escape sequences are passed through verbatim
+/// <c>\\</c> (literal backslash), <c>\n</c> (LF), <c>\t</c> (TAB),
+/// <c>\r</c> (CR), and <c>\v</c> (VT, the soft-line-break char). Unknown escape sequences are passed through verbatim
 /// so today's behavior for stray backslashes (e.g. Windows paths typed
 /// without doubling) doesn't regress.
 /// </summary>
@@ -48,6 +48,9 @@ public static class TextEscape
                 case 'n':  sb.Append('\n'); i++; break;
                 case 't':  sb.Append('\t'); i++; break;
                 case 'r':  sb.Append('\r'); i++; break;
+                // NEWLINE-SEMANTICS-V2: '\v' = soft line break, the same
+                // two-char escape convenience text= already gives \n / \t.
+                case 'v':  sb.Append('\v'); i++; break;
                 default:
                     // Unknown escape — pass the backslash through verbatim
                     // (subsequent char handled on next iteration).
