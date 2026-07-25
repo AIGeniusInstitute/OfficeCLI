@@ -1,4 +1,4 @@
-// Copyright 2026 OfficeCLI (https://OfficeCLI.AI)
+﻿// Copyright 2026 OfficeCLI (https://OfficeCLI.AI)
 // SPDX-License-Identifier: Apache-2.0
 
 using System.CommandLine;
@@ -62,7 +62,7 @@ static partial class CommandBuilder
             string csvContent;
             if (useStdin)
             {
-                csvContent = Console.In.ReadToEnd();
+                csvContent = StdIn.ReadToEnd();
             }
             else if (source != null)
             {

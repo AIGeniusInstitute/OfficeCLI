@@ -1,4 +1,4 @@
-// Copyright 2026 OfficeCLI (https://OfficeCLI.AI)
+﻿// Copyright 2026 OfficeCLI (https://OfficeCLI.AI)
 // SPDX-License-Identifier: Apache-2.0
 
 using System.CommandLine;
@@ -188,7 +188,7 @@ static partial class CommandBuilder
                 {
                     var stdinPeek = System.Threading.Tasks.Task.Run(() =>
                     {
-                        try { return Console.In.Peek() != -1; }
+                        try { return StdIn.Peek() != -1; }
                         catch { return false; }
                     });
                     stdinHasInput = stdinPeek.Wait(TimeSpan.FromMilliseconds(50)) && stdinPeek.Result;
@@ -225,7 +225,7 @@ static partial class CommandBuilder
                 // skipped on purpose — '-' is not a path.)
                 if (inputFile.Name == "-")
                 {
-                    jsonText = StripBom(Console.In.ReadToEnd());
+                    jsonText = StripBom(StdIn.ReadToEnd());
                 }
                 else
                 {
@@ -244,7 +244,7 @@ static partial class CommandBuilder
                 // System.Text.Json.Parse with "'﻿' is an invalid start of
                 // a value" while `batch --input utf8bom.json` succeeded —
                 // splitting the contract on the input source.
-                jsonText = StripBom(Console.In.ReadToEnd());
+                jsonText = StripBom(StdIn.ReadToEnd());
             }
 
             // Pre-validate: check for unknown JSON fields before deserializing
@@ -637,9 +637,39 @@ static partial class CommandBuilder
     }
 
     // UTF-8 BOM trim. File.ReadAllText handles this implicitly via
-    // StreamReader's detect-encoding; Console.In feeds raw chars.
+    // StreamReader's detect-encoding; the stdin reader feeds raw chars.
     private static string StripBom(string s)
         => !string.IsNullOrEmpty(s) && s[0] == '﻿' ? s.Substring(1) : s;
+
+    /// <summary>
+    /// UTF-8 view of the process's stdin, used everywhere this CLI reads piped
+    /// input (batch JSON, import CSV/TSV).
+    ///
+    /// Console.In would decode with Console.InputEncoding, which on Windows is
+    /// the console's input code page (CP437 on en-US, CP936 on zh-CN) and never
+    /// UTF-8 — piped payloads arrived mojibaked. Setting Console.InputEncoding
+    /// fixes the decode but calls SetConsoleCP on the console object, which is
+    /// shared with the parent shell and outlives this process: every officecli
+    /// run would leave the user's terminal pinned to CP 65001, breaking
+    /// non-ASCII keyboard input for legacy console programs run afterwards.
+    /// Gating on Console.IsInputRedirected does not help — a piped run has a
+    /// console attached too, so it leaks in exactly the case the decode fix is
+    /// for. Reading through our own StreamReader gets correct UTF-8 with no
+    /// global console mutation. Same approach McpServer already uses.
+    ///
+    /// One shared instance, because the batch path Peeks before it Reads and a
+    /// second reader would swallow whatever the first one buffered. Wrapped in
+    /// TextReader.Synchronized to match Console.In's thread-safety — the Peek
+    /// runs on a worker thread that may be abandoned on timeout.
+    /// </summary>
+    private static readonly Lazy<TextReader> LazyStdIn = new(() =>
+        TextReader.Synchronized(new StreamReader(
+            Console.OpenStandardInput(),
+            new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            // StripBom owns BOM handling; don't let detection also switch encodings.
+            detectEncodingFromByteOrderMarks: false)));
+
+    internal static TextReader StdIn => LazyStdIn.Value;
 
     /// <summary>
     /// The atomic temp name adds ~45 bytes of affixes around the document's
