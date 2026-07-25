@@ -23,6 +23,13 @@ OfficeCli.Core.LocaleFontRegistry.OsLocaleSnapshot = System.Globalization.Cultur
 System.Globalization.CultureInfo.DefaultThreadCurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
 System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = System.Globalization.CultureInfo.InvariantCulture;
 
+// On Unix, named-pipe sockets live under $TMPDIR; a long (sandbox-nested)
+// TMPDIR pushes them past the kernel's socket-path cap and resident/watch
+// startup breaks (issue #263). Must run before any pipe endpoint or
+// Path.GetTempPath()-keyed .lock/.port file is touched, including the
+// __resident-serve__ dispatch below.
+OfficeCli.Core.PipeTempDirGuard.EnsurePipePathFits();
+
 // Internal commands (spawned as separate processes, not user-facing)
 if (args.Length == 1 && args[0] == "__update-check__")
 {
