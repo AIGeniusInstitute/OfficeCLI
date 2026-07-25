@@ -2506,11 +2506,13 @@ public partial class WordHandler : IDocumentHandler, Rendering.IRenderModelHost
         {
             // Read-only session (no _packageStream): we never wrote anything,
             // so leave the on-disk bytes strictly untouched. The legacy
-            // post-close NormalizeSelfClosingInDocx ran here too, but opening
-            // the zip in Update mode rewrites the whole archive whenever
-            // document.xml contains "<w:br />"/"<w:tab />" — a pure
-            // view/get/query/validate changed the file's bytes and mtime
-            // (issue #231). Normalization still runs on every editable save
+            // post-close NormalizeSelfClosingInDocx ran here too, but a zip
+            // opened in ZipArchiveMode.Update rewrites the whole archive on
+            // dispose UNCONDITIONALLY — even when no entry changed. Files
+            // officecli wrote are already in .NET's container form, so the
+            // rewrite was byte-idempotent and invisible; any foreign producer
+            // (Word, POI) saw a pure view/get/query/validate change the
+            // file's bytes and mtime on first read (issue #231). Normalization still runs on every editable save
             // via AtomicWriteBack above, which is the only path that may
             // legitimately alter the file. _pendingWholeParts is only staged
             // by mutations, which require an editable session, so nothing can
