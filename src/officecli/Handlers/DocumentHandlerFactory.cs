@@ -71,26 +71,26 @@ public static class DocumentHandlerFactory
         // `dump`/`query` traversal — where it escapes this try/catch and crashes
         // the command. Real producers ship such decks (e.g. a diagramDrawing
         // rId pointing at a diagrams/drawingN.xml that was never written) and
-        // PowerPoint tolerates them. Strip the dangling rels up-front so every
-        // command (not just Open) survives, reusing the same in-place repair the
-        // reactive path uses. The scan is read-only and only rewrites when a
-        // dangling rel is actually present, so the clean-file path pays only a
-        // cheap .rels read.
-        if ((ext is ".docx" or ".xlsx" or ".pptx") && HasDanglingInternalRels(filePath))
+        // PowerPoint tolerates them. For editable handlers, strip the dangling
+        // rels up-front so every mutating command survives. A read-only open
+        // must never rewrite the caller's source file as a side effect.
+        if (editable
+            && (ext is ".docx" or ".xlsx" or ".pptx")
+            && HasDanglingInternalRels(filePath))
             StripDanglingPackageRels(filePath);
 
         try
         {
             return OpenHandler(filePath, ext, editable);
         }
-        catch (Exception ex) when (IsEncodingException(ex))
+        catch (Exception ex) when (editable && IsEncodingException(ex))
         {
             // Files created by python-pptx (lxml) use encoding="ascii" which Open XML SDK rejects.
             // Fix the XML declarations in-place and retry.
             FixXmlEncoding(filePath);
             return OpenHandler(filePath, ext, editable);
         }
-        catch (Exception ex) when (IsDanglingPartException(ex))
+        catch (Exception ex) when (editable && IsDanglingPartException(ex))
         {
             // Some producers strip a part (e.g. a sensitivity-label
             // docMetadata/LabelInfo.xml) but leave its relationship behind.
@@ -405,10 +405,28 @@ public static class DocumentHandlerFactory
     /// </summary>
     private static string? ResolveInternalRelTarget(System.Xml.Linq.XElement rel, string baseDir)
     {
+        // Hyperlink targets are URI references, not package parts. Excel can
+        // store a drawing hyperlink such as "#Sheet1!A1" in drawingN.xml.rels
+        // without TargetMode="External". Treating that target as an OPC part
+        // makes the dangling-rel repair delete the relationship while leaving
+        // <a:hlinkClick r:id="..."> behind, and Excel then repairs drawingN.xml.
+        var relationshipType = (string?)rel.Attribute("Type");
+        if (relationshipType?.EndsWith("/hyperlink", StringComparison.OrdinalIgnoreCase) == true)
+            return null;
+
         if (string.Equals((string?)rel.Attribute("TargetMode"), "External", StringComparison.OrdinalIgnoreCase))
             return null;
         var target = (string?)rel.Attribute("Target");
         if (string.IsNullOrEmpty(target)) return null;
+        if (target.StartsWith("#", StringComparison.Ordinal)) return null;
+
+        // A non-hyperlink internal relationship may legally carry a fragment;
+        // only the URI path identifies the package part.
+        var fragmentIndex = target.IndexOf('#');
+        if (fragmentIndex >= 0)
+            target = target.Substring(0, fragmentIndex);
+        if (target.Length == 0) return null;
+
         var resolved = target.StartsWith("/")
             ? target.TrimStart('/')
             : (baseDir.Length > 0 ? baseDir + "/" + target : target);
