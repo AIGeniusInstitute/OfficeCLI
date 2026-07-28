@@ -5,6 +5,12 @@
 // Ensure UTF-8 output on all platforms (Windows defaults to system codepage e.g. GBK)
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
+// The input side is deliberately NOT handled here. Console.InputEncoding would
+// decode piped stdin correctly but calls SetConsoleCP on the console object,
+// which is shared with the parent shell and outlives this process — every
+// officecli run would leave the user's terminal pinned to CP 65001. Stdin is
+// read through an explicit UTF-8 reader instead; see CommandBuilder.StdIn.
+
 // Snapshot the OS user culture BEFORE we pin the thread to Invariant.
 // Read by `create --locale` (when no explicit tag is given) to bake the
 // user's actual locale into the new doc, mirroring what Word / Pages /

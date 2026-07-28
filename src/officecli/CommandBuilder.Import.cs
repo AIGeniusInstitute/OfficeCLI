@@ -62,7 +62,7 @@ static partial class CommandBuilder
             string csvContent;
             if (useStdin)
             {
-                csvContent = Console.In.ReadToEnd();
+                csvContent = StdIn.ReadToEnd();
             }
             else if (source != null)
             {
