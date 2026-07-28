@@ -71,36 +71,70 @@ public static class DocumentHandlerFactory
         // `dump`/`query` traversal — where it escapes this try/catch and crashes
         // the command. Real producers ship such decks (e.g. a diagramDrawing
         // rId pointing at a diagrams/drawingN.xml that was never written) and
-        // PowerPoint tolerates them. For editable handlers, strip the dangling
-        // rels up-front so every mutating command survives. A read-only open
-        // must never rewrite the caller's source file as a side effect.
-        if (editable
-            && (ext is ".docx" or ".xlsx" or ".pptx")
-            && HasDanglingInternalRels(filePath))
-            StripDanglingPackageRels(filePath);
+        // PowerPoint tolerates them.
+        //
+        // Repair target diverges by mode. An editable open repairs the source
+        // in place — Save rewrites it anyway, so stripping a dangling rel first
+        // costs nothing extra. A read-only open must stay byte-preserving, so it
+        // repairs a throwaway temp COPY and opens on that; the source is never
+        // touched. The temp is registered for process-exit cleanup (a one-shot
+        // command exits right after the read; a resident is bound to one file).
+        string openTarget = filePath;
+        string? repairTemp = null;
+        if ((ext is ".docx" or ".xlsx" or ".pptx") && HasDanglingInternalRels(filePath))
+        {
+            if (editable)
+                StripDanglingPackageRels(filePath);
+            else
+            {
+                repairTemp = CreateReadOnlyRepairCopy(filePath);
+                openTarget = repairTemp;
+                StripDanglingPackageRels(repairTemp);
+            }
+        }
 
         try
         {
-            return OpenHandler(filePath, ext, editable);
+            var handler = OpenHandler(openTarget, ext, editable);
+            if (repairTemp != null) RegisterReadOnlyRepairTemp(repairTemp);
+            return handler;
         }
-        catch (Exception ex) when (editable && IsEncodingException(ex))
+        catch (Exception ex) when (IsEncodingException(ex))
         {
             // Files created by python-pptx (lxml) use encoding="ascii" which Open XML SDK rejects.
-            // Fix the XML declarations in-place and retry.
-            FixXmlEncoding(filePath);
-            return OpenHandler(filePath, ext, editable);
+            // Editable: fix the source in-place. Read-only: fix the temp copy so
+            // the source stays byte-identical. Reuse the temp if one was already
+            // spun up by the dangling-rel pre-strip above.
+            if (editable)
+            {
+                FixXmlEncoding(filePath);
+                return OpenHandler(filePath, ext, editable);
+            }
+            repairTemp ??= CreateReadOnlyRepairCopy(filePath);
+            FixXmlEncoding(repairTemp);
+            var handler = OpenHandler(repairTemp, ext, editable);
+            RegisterReadOnlyRepairTemp(repairTemp);
+            return handler;
         }
-        catch (Exception ex) when (editable && IsDanglingPartException(ex))
+        catch (Exception ex) when (IsDanglingPartException(ex))
         {
             // Some producers strip a part (e.g. a sensitivity-label
             // docMetadata/LabelInfo.xml) but leave its relationship behind.
             // The SDK throws "Part: X doesn't exist in the package" on the
             // first part-graph walk, so EVERY command failed on the file even
             // though Word opens it fine (it ignores the dangling rel). Remove
-            // the dangling internal relationships in-place and retry — mirrors
-            // the FixXmlEncoding repair-and-retry path above.
-            StripDanglingPackageRels(filePath);
-            return OpenHandler(filePath, ext, editable);
+            // the dangling internal relationships and retry — mirrors the
+            // FixXmlEncoding repair-and-retry path above, source vs temp per mode.
+            if (editable)
+            {
+                StripDanglingPackageRels(filePath);
+                return OpenHandler(filePath, ext, editable);
+            }
+            repairTemp ??= CreateReadOnlyRepairCopy(filePath);
+            StripDanglingPackageRels(repairTemp);
+            var handler = OpenHandler(repairTemp, ext, editable);
+            RegisterReadOnlyRepairTemp(repairTemp);
+            return handler;
         }
         catch (DocumentFormat.OpenXml.Packaging.OpenXmlPackageException ex)
         {
@@ -481,6 +515,46 @@ public static class DocumentHandlerFactory
     /// .rels entries are touched, and only the dangling Relationship nodes are
     /// dropped.
     /// </summary>
+    /// <summary>
+    /// Copy the source file to a throwaway temp with the same extension, for the
+    /// read-only repair path. The in-place repair functions
+    /// (<see cref="StripDanglingPackageRels"/>, <see cref="FixXmlEncoding"/>)
+    /// then run on the copy so the caller's file stays byte-identical.
+    /// </summary>
+    private static string CreateReadOnlyRepairCopy(string filePath)
+    {
+        var temp = Path.Combine(
+            Path.GetTempPath(),
+            $"ocli_ro_{Guid.NewGuid():N}{Path.GetExtension(filePath)}");
+        File.Copy(filePath, temp, overwrite: true);
+        return temp;
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentBag<string> _readOnlyRepairTemps = new();
+    private static int _readOnlyRepairCleanupHooked;
+
+    /// <summary>
+    /// Track a read-only repair copy for deletion at process exit. The concrete
+    /// handler keeps the temp file open for its lifetime (Word/PPT lazy-load
+    /// parts) and the codebase relies on <c>handler is ExcelHandler</c>-style
+    /// concrete-type checks throughout, so a disposing decorator is not viable.
+    /// A one-shot CLI command exits right after the read, cleaning the temp
+    /// immediately; a resident is bound to a single file (one temp at most).
+    /// The source file is never touched either way.
+    /// </summary>
+    private static void RegisterReadOnlyRepairTemp(string tempPath)
+    {
+        _readOnlyRepairTemps.Add(tempPath);
+        if (System.Threading.Interlocked.Exchange(ref _readOnlyRepairCleanupHooked, 1) == 0)
+        {
+            AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+            {
+                foreach (var t in _readOnlyRepairTemps)
+                    try { File.Delete(t); } catch { /* ages out of TEMP */ }
+            };
+        }
+    }
+
     private static void StripDanglingPackageRels(string filePath)
     {
         using var zip = ZipFile.Open(filePath, ZipArchiveMode.Update);
