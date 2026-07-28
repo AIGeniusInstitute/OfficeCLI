@@ -133,7 +133,10 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
             }
             _doc = PresentationDocument.Open((Stream?)_packageStream ?? _backingStream, editable);
             if (editable)
-                InitShapeIdCounter();
+                // fromRawStreams: don't materialize every slide's DOM just to
+                // index shape ids — that would make a later Save re-serialize
+                // untouched slides (#267). Read ids from the raw part streams.
+                InitShapeIdCounter(fromRawStreams: true);
         }
         catch
         {
