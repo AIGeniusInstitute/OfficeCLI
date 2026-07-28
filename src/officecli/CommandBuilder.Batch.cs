@@ -28,7 +28,11 @@ static partial class CommandBuilder
         + "  {\"command\":\"add\",\"parent\":\"/slide[1]\",\"type\":\"shape\",\"props\":{\"text\":\"Hi\",\"x\":\"1cm\",\"y\":\"2cm\"}},\n"
         + "  {\"command\":\"set\",\"path\":\"/slide[1]/shape[1]\",\"props\":{\"bold\":\"true\"}},\n"
         + "  {\"command\":\"remove\",\"path\":\"/slide[2]/shape[3]\"}\n"
-        + "]";
+        + "]\n\n"
+        + "Text values follow the same rules as --prop on a single command: \\n starts a new "
+        + "paragraph, \\v is a line break within one. A .docx dump taken before that split "
+        + "encoded line breaks as \\n; replay one by putting "
+        + "{\"command\":\"meta\",\"dumpVersion\":1} first and its \\n are read as line breaks again.";
 
     /// <summary>
     /// Apply a batch of commands against an already-open handler. This is the
