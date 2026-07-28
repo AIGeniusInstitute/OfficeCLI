@@ -655,10 +655,16 @@ static partial class CommandBuilder
     /// shared with the parent shell and outlives this process: every officecli
     /// run would leave the user's terminal pinned to CP 65001, breaking
     /// non-ASCII keyboard input for legacy console programs run afterwards.
-    /// Gating on Console.IsInputRedirected does not help — a piped run has a
-    /// console attached too, so it leaks in exactly the case the decode fix is
-    /// for. Reading through our own StreamReader gets correct UTF-8 with no
+    /// Gating that mutation on Console.IsInputRedirected does not help — a piped
+    /// run has a console attached too, so it leaks in exactly the case the decode
+    /// fix is for. Reading through our own StreamReader gets correct UTF-8 with no
     /// global console mutation. Same approach McpServer already uses.
+    ///
+    /// The reader itself IS gated on IsInputRedirected, for the opposite reason:
+    /// with no redirect the stream sits on the console, which hands back bytes in
+    /// its own input code page, so a UTF-8 reader would mojibake anything
+    /// non-ASCII typed at the prompt. Console.In decodes that case correctly and
+    /// there is nothing to fix there — the bug is redirected input only.
     ///
     /// One shared instance, because the batch path Peeks before it Reads and a
     /// second reader would swallow whatever the first one buffered. Wrapped in
@@ -666,11 +672,13 @@ static partial class CommandBuilder
     /// runs on a worker thread that may be abandoned on timeout.
     /// </summary>
     private static readonly Lazy<TextReader> LazyStdIn = new(() =>
-        TextReader.Synchronized(new StreamReader(
-            Console.OpenStandardInput(),
-            new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-            // StripBom owns BOM handling; don't let detection also switch encodings.
-            detectEncodingFromByteOrderMarks: false)));
+        Console.IsInputRedirected
+            ? TextReader.Synchronized(new StreamReader(
+                Console.OpenStandardInput(),
+                new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                // StripBom owns BOM handling; don't let detection also switch encodings.
+                detectEncodingFromByteOrderMarks: false))
+            : Console.In);
 
     internal static TextReader StdIn => LazyStdIn.Value;
 
