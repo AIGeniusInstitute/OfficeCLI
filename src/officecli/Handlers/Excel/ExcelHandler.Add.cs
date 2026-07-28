@@ -258,6 +258,10 @@ public partial class ExcelHandler
                 }
             }
 
+            // Mark the document modified so Dispose flushes it. Without this,
+            // a `using (h) h.Move(...)` (no explicit Save) is silently dropped
+            // by the !Modified byte-preserving discard path in Dispose.
+            Modified = true;
             workbook.Save();
             return $"/{sheetName}";
         }
@@ -350,6 +354,9 @@ public partial class ExcelHandler
             if (targetSheetData != sheetData)
                 tgtOldIdx = targetSheetData.Elements<Row>().ToDictionary(r => r, r => (int)(r.RowIndex?.Value ?? 0));
 
+            // Mark modified before the first irreversible mutation so Dispose
+            // flushes (the !Modified path would otherwise discard the move).
+            Modified = true;
             row.Remove();
 
             if (targetIndex.HasValue)
@@ -456,6 +463,10 @@ public partial class ExcelHandler
                 // No-op: moving a col to its own slot or right after itself.
                 return $"/{sheetName}/col[{srcColLetter}]";
             }
+
+            // Mark modified before mutating so Dispose flushes (past the no-op
+            // early return above; the !Modified path would else discard the move).
+            Modified = true;
 
             // Build the col renumber map. Two cases:
             //   src < target: cols (src+1)..(target-1) shift left by 1; src moves to (target-1).
@@ -708,6 +719,10 @@ public partial class ExcelHandler
         // so cachedValue stays consistent with the formula.
         var oldIdx = sheetData.Elements<Row>().ToDictionary(r => r, r => (int)(r.RowIndex?.Value ?? 0));
 
+        // Mark modified before the swap so Dispose flushes it (the !Modified
+        // byte-preserving discard path would otherwise drop the whole swap).
+        Modified = true;
+
         // Physically exchange the two rows in document order, then renumber by
         // document order — mirrors Move's reposition + RenumberRowsAndCellRefs.
         PowerPointHandler.SwapXmlElements(row1, row2);
@@ -879,6 +894,9 @@ public partial class ExcelHandler
                 }
             }
 
+            // Mark modified so Dispose flushes the copy (the !Modified
+            // byte-preserving discard path would otherwise drop it).
+            Modified = true;
             SaveWorksheet(tgtWorksheet);
             return $"{targetParentPath}/row[{newRowIndex}]";
         }
@@ -1028,6 +1046,9 @@ public partial class ExcelHandler
                 tgtMergeCells.Count = (uint)tgtMergeCells.Elements<MergeCell>().Count();
             }
 
+            // Mark modified so Dispose flushes the copy (the !Modified
+            // byte-preserving discard path would otherwise drop it).
+            Modified = true;
             DeleteCalcChainIfPresent();
             SaveWorksheet(tgtWorksheet);
             return $"{targetParentPath}/col[{targetColLetter}]";
