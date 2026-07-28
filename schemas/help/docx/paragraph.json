@@ -1006,11 +1006,19 @@
     "fill": {
       "type": "color",
       "description": "paragraph background shading (w:shd @fill). A solid background reads back as this canonical key (matching table cells and runs). Accepts a solid color — hex ('FF0000'), '#'-prefixed hex ('#FF0000'), named color ('red'), or rgb(...) notation. For a true pattern shading (pct*/stripe/cross) or a foreground pattern color, pass the legacy `shd`/`shading` triplet form 'PATTERN;FILL[;COLOR]' instead; those read back via the shading.* detail keys.",
-      "aliases": ["shd", "shading"],
+      "aliases": [
+        "shd",
+        "shading"
+      ],
       "add": true,
       "set": true,
       "get": true,
-      "examples": ["--prop fill=FFFF00", "--prop fill=#FF0000", "--prop fill=red", "--prop shd=\"pct25;FF0000;0000FF\""],
+      "examples": [
+        "--prop fill=FFFF00",
+        "--prop fill=#FF0000",
+        "--prop fill=red",
+        "--prop shd=\"pct25;FF0000;0000FF\""
+      ],
       "readback": "#RRGGBB uppercase",
       "enforcement": "report"
     },
@@ -1086,56 +1094,74 @@
     "pbdr.top": {
       "type": "string",
       "description": "paragraph border edge descriptor. Emitted only when present.",
-      "add": false,
-      "set": false,
-      "get": false,
+      "add": true,
+      "set": true,
+      "get": true,
       "readback": "n/a (handler does not surface paragraph borders today)",
-      "enforcement": "report"
+      "enforcement": "report",
+      "examples": [
+        "--prop pbdr.top=\"single;4;#FF0000\""
+      ]
     },
     "pbdr.bottom": {
       "type": "string",
       "description": "paragraph border edge descriptor. Emitted only when present.",
-      "add": false,
-      "set": false,
-      "get": false,
+      "add": true,
+      "set": true,
+      "get": true,
       "readback": "n/a (handler does not surface paragraph borders today)",
-      "enforcement": "report"
+      "enforcement": "report",
+      "examples": [
+        "--prop pbdr.bottom=\"single;4;#FF0000\""
+      ]
     },
     "pbdr.left": {
       "type": "string",
       "description": "paragraph border edge descriptor. Emitted only when present.",
-      "add": false,
-      "set": false,
-      "get": false,
+      "add": true,
+      "set": true,
+      "get": true,
       "readback": "n/a (handler does not surface paragraph borders today)",
-      "enforcement": "report"
+      "enforcement": "report",
+      "examples": [
+        "--prop pbdr.left=\"single;4;#FF0000\""
+      ]
     },
     "pbdr.right": {
       "type": "string",
       "description": "paragraph border edge descriptor. Emitted only when present.",
-      "add": false,
-      "set": false,
-      "get": false,
+      "add": true,
+      "set": true,
+      "get": true,
       "readback": "n/a (handler does not surface paragraph borders today)",
-      "enforcement": "report"
+      "enforcement": "report",
+      "examples": [
+        "--prop pbdr.right=\"single;4;#FF0000\""
+      ]
     },
     "pbdr.between": {
       "type": "string",
       "description": "paragraph border edge descriptor. Emitted only when present.",
-      "add": false,
-      "set": false,
-      "get": false,
+      "add": true,
+      "set": true,
+      "get": true,
       "readback": "n/a (handler does not surface paragraph borders today)",
-      "enforcement": "report"
+      "enforcement": "report",
+      "examples": [
+        "--prop pbdr.between=\"single;4;#FF0000\""
+      ]
     },
     "pbdr.bar": {
       "type": "string",
       "description": "paragraph border edge descriptor. Emitted only when present.",
-      "add": false,
-      "set": false,
-      "get": false,
+      "add": true,
+      "set": true,
+      "get": true,
       "readback": "n/a (handler does not surface paragraph borders today)",
-      "enforcement": "report"
+      "enforcement": "report",
+      "examples": [
+        "--prop pbdr.bar=\"single;4;#FF0000\""
+      ]
     },
     "firstLineChars": {
       "type": "number",
