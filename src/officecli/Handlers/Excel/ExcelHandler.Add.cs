@@ -1086,6 +1086,89 @@ public partial class ExcelHandler
                 var chartIdx = drawingsPart.ChartParts.ToList().IndexOf(chartPart);
                 return (relId, $"/{sheetName}/chart[{chartIdx + 1}]");
 
+            case "drawing-group":
+            {
+                // Verbatim DrawingML group carrier for xlsx dump→batch.
+                // The full hosting anchor is preserved because flattening a
+                // <xdr:grpSp> loses the child coordinate system, z-order,
+                // styles and the fact that the objects are grouped. Only
+                // hyperlink relationships are carried here; dump falls back
+                // to semantic leaf shapes when a group references package
+                // parts such as images/charts.
+                var groupSheetName = parentPartPath.TrimStart('/');
+                var groupWorksheet = FindWorksheet(groupSheetName)
+                    ?? throw new ArgumentException(
+                        $"Sheet not found: {groupSheetName}. drawing-group must be added under a sheet.");
+                properties ??= new Dictionary<string, string>();
+                var anchorXml = properties.GetValueOrDefault("anchor-xml")
+                    ?? throw new ArgumentException(
+                        "'anchor-xml' property is required for drawing-group (verbatim xdr anchor XML)");
+
+                XDR.TwoCellAnchor groupAnchor;
+                try
+                {
+                    groupAnchor = new XDR.TwoCellAnchor(anchorXml);
+                }
+                catch (Exception ex)
+                {
+                    throw new ArgumentException(
+                        $"drawing-group anchor XML is not a valid xdr:twoCellAnchor: {ex.Message}", ex);
+                }
+                if (groupAnchor.GetFirstChild<XDR.GroupShape>() == null)
+                    throw new ArgumentException(
+                        "drawing-group anchor XML must contain a top-level xdr:grpSp.");
+
+                List<DumpDrawingHyperlinkSpec> groupHyperlinks;
+                try
+                {
+                    groupHyperlinks = DecodeDumpDrawingHyperlinks(
+                        properties.GetValueOrDefault("hyperlinks") ?? "");
+                }
+                catch (FormatException ex)
+                {
+                    throw new ArgumentException(
+                        $"drawing-group 'hyperlinks' carrier is invalid: {ex.Message}", ex);
+                }
+
+                Modified = true;
+                var groupDrawingsPart = groupWorksheet.DrawingsPart
+                    ?? groupWorksheet.AddNewPart<DrawingsPart>();
+                if (groupDrawingsPart.WorksheetDrawing == null)
+                {
+                    groupDrawingsPart.WorksheetDrawing = new XDR.WorksheetDrawing();
+                    groupDrawingsPart.WorksheetDrawing.Save();
+                }
+                var groupSheet = GetSheet(groupWorksheet);
+                if (groupSheet.GetFirstChild<SpreadsheetDrawing>() == null)
+                {
+                    var drawingRelId = groupWorksheet.GetIdOfPart(groupDrawingsPart);
+                    groupSheet.Append(new SpreadsheetDrawing { Id = drawingRelId });
+                    SaveWorksheet(groupWorksheet);
+                }
+
+                // Relationship IDs are scoped to the destination drawing part.
+                // Create fresh IDs (avoids collisions with pictures/charts
+                // emitted earlier), then rewrite every r:id/r:embed/r:link in
+                // the verbatim group anchor that referenced the source ID.
+                foreach (var hyperlink in groupHyperlinks)
+                {
+                    if (string.IsNullOrEmpty(hyperlink.Id) || string.IsNullOrEmpty(hyperlink.Target))
+                        throw new ArgumentException(
+                            "drawing-group hyperlink entries require non-empty Id and Target.");
+                    var uri = new Uri(hyperlink.Target, UriKind.RelativeOrAbsolute);
+                    var replayRel = groupDrawingsPart.AddHyperlinkRelationship(
+                        uri, hyperlink.IsExternal);
+                    RemapDrawingRelationshipId(groupAnchor, hyperlink.Id, replayRel.Id);
+                }
+
+                groupDrawingsPart.WorksheetDrawing.AppendChild(groupAnchor);
+                groupDrawingsPart.WorksheetDrawing.Save();
+                var groupIndex = groupDrawingsPart.WorksheetDrawing
+                    .Elements<XDR.TwoCellAnchor>()
+                    .Count(a => a.GetFirstChild<XDR.GroupShape>() != null);
+                return ("group", $"/{groupSheetName}/group[{groupIndex}]");
+            }
+
             case "chartex":
             {
                 // Extended (cx:) chart carrier for dump→batch round-trip.
@@ -1258,7 +1341,24 @@ public partial class ExcelHandler
 
             default:
                 throw new ArgumentException(
-                    $"Unknown part type: {partType}. Supported: chart, chartex, ole");
+                    $"Unknown part type: {partType}. Supported: chart, chartex, drawing-group, ole");
+        }
+    }
+
+    private static void RemapDrawingRelationshipId(
+        OpenXmlElement root, string sourceId, string destinationId)
+    {
+        const string relNs =
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        foreach (var element in root.Descendants().Prepend(root))
+        {
+            foreach (var attr in element.GetAttributes()
+                .Where(a => a.NamespaceUri == relNs && a.Value == sourceId)
+                .ToList())
+            {
+                element.SetAttribute(new OpenXmlAttribute(
+                    attr.Prefix, attr.LocalName, attr.NamespaceUri, destinationId));
+            }
         }
     }
 
