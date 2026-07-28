@@ -227,7 +227,7 @@ internal class WatchServer : IDisposable
             {
                 try
                 {
-                    if (p.StartTime.ToUniversalTime().Ticks != expectedStartTicksUtc.Value)
+                    if (!StartTicksMatch(p.StartTime.ToUniversalTime().Ticks, expectedStartTicksUtc.Value))
                         return false; // pid recycled by an unrelated process
                 }
                 catch
@@ -244,6 +244,21 @@ internal class WatchServer : IDisposable
         catch (ArgumentException) { return false; }
         catch (InvalidOperationException) { return false; }
     }
+
+    // Process start-time identity check, tolerant of platform jitter. On Linux
+    // Process.StartTime is derived from /proc/<pid>/stat jiffies + boot time,
+    // and the same live process yields a slightly different tick count when
+    // read by another process (~hundreds of microseconds) than the value it
+    // recorded for itself — so an EXACT tick comparison wrongly reports a live
+    // watch as dead, deleting its marker and breaking watch on Linux (regression
+    // from the pid-only check). Windows/macOS read a precise kernel creation
+    // timestamp that is stable across readers. A 2-second tolerance absorbs the
+    // Linux jitter while still rejecting a recycled pid, whose unrelated process
+    // started seconds-to-hours after the crashed writer.
+    internal static readonly long StartTicksTolerance = TimeSpan.FromSeconds(2).Ticks;
+
+    internal static bool StartTicksMatch(long actualTicks, long expectedTicks)
+        => Math.Abs(actualTicks - expectedTicks) <= StartTicksTolerance;
 
     private void WriteMarker()
     {
