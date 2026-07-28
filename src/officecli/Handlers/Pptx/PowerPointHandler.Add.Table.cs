@@ -33,20 +33,20 @@ public partial class PowerPointHandler
                 string[][]? tableData = null;
                 if (properties.TryGetValue("data", out var dataStr))
                 {
+                    // Both forms are quote-aware: a cell wrapped in double
+                    // quotes may contain the separator, so `"Doe, John",30` is
+                    // two cells. A plain Split(',') made it three.
+                    // CONSISTENCY(table-data-parse): mirrored in the docx path.
                     if (OfficeCli.Core.FileSource.IsResolvable(dataStr))
                     {
                         // CSV file/URL/data-URI
-                        tableData = OfficeCli.Core.FileSource.ResolveLines(dataStr)
-                            .Where(l => !string.IsNullOrWhiteSpace(l))
-                            .Select(l => l.Split(',').Select(c => c.Trim()).ToArray())
-                            .ToArray();
+                        tableData = OfficeCli.Core.DelimitedText.ParseGrid(
+                            OfficeCli.Core.FileSource.ResolveText(dataStr), ',', '\n');
                     }
                     else
                     {
                         // Inline: semicolons separate rows, commas separate cells
-                        tableData = dataStr.Split(';')
-                            .Select(r => r.Split(',').Select(c => c.Trim()).ToArray())
-                            .ToArray();
+                        tableData = OfficeCli.Core.DelimitedText.ParseGrid(dataStr, ',', ';');
                     }
                 }
 
