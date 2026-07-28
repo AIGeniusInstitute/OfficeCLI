@@ -422,7 +422,7 @@ static partial class CommandBuilder
     private sealed record LintFinding(int Index, string Type, string Element, string Prop);
 
     private static string TruncateForLint(string s, int max) =>
-        s.Length <= max ? s : s.Substring(0, max) + "...";
+        OfficeCli.Core.DisplayText.Truncate(s, max, "...");
 
     /// <summary>
     /// Best-effort extraction of the leaf element type from a path like
