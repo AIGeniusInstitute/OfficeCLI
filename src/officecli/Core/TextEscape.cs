@@ -60,4 +60,18 @@ public static class TextEscape
         }
         return sb.ToString();
     }
+
+    /// <summary>
+    /// Inverse of <see cref="Resolve"/>: double every backslash so a value that
+    /// already holds its final text survives a downstream Resolve unchanged.
+    /// Needed when a payload whose escapes are already literal (JSON) is handed
+    /// to the CLI parser, which resolves them. Returns the input unchanged when
+    /// it contains no backslash.
+    /// </summary>
+    public static string Protect(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return value ?? string.Empty;
+        if (value.IndexOf('\\') < 0) return value;
+        return value.Replace("\\", "\\\\");
+    }
 }

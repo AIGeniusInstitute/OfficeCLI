@@ -1287,9 +1287,7 @@ static partial class CommandBuilder
                 // shortcuts (so `--prop c1='a\nb'` breaks the line exactly like
                 // `--prop text=` does); other props (colors, paths, numbers)
                 // are passed through untouched.
-                if (key.Equals("text", StringComparison.OrdinalIgnoreCase)
-                    || key.Equals("value", StringComparison.OrdinalIgnoreCase)
-                    || IsCellTextShortcutKey(key))
+                if (KeyTakesCEscapes(key))
                 {
                     value = OfficeCli.Core.TextEscape.Resolve(value);
                 }
@@ -1318,6 +1316,18 @@ static partial class CommandBuilder
         }
         return dict;
     }
+
+    /// <summary>
+    /// CONSISTENCY(text-escape-boundary): the --prop keys whose values go
+    /// through TextEscape.Resolve on the way in. Anything that builds argv from
+    /// a payload where escapes are ALREADY literal — a JSON body, a batch item —
+    /// must run those same values through TextEscape.Protect first, or the
+    /// resolution happens a second time and eats the user's backslashes.
+    /// </summary>
+    internal static bool KeyTakesCEscapes(string key)
+        => key.Equals("text", StringComparison.OrdinalIgnoreCase)
+           || key.Equals("value", StringComparison.OrdinalIgnoreCase)
+           || IsCellTextShortcutKey(key);
 
     // Row-level cell-text shortcut key: `c` followed by digits (c1, c2, …, cN).
     // These carry table-cell text, so they take the same `\n`/`\t` escape

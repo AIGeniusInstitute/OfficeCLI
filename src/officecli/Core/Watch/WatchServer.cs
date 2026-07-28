@@ -2414,7 +2414,7 @@ internal class WatchServer : IDisposable
                         var prop = root.GetProperty("prop").GetString() ?? "text";
                         var value = root.GetProperty("value").GetString() ?? "";
                         psi.ArgumentList.Add("--prop");
-                        psi.ArgumentList.Add($"{prop}={value}");
+                        psi.ArgumentList.Add($"{prop}={PropValueForArgv(prop, value)}");
                     }
                     break;
                 }
@@ -2870,9 +2870,22 @@ internal class WatchServer : IDisposable
         foreach (var kv in propsEl.EnumerateObject())
         {
             psi.ArgumentList.Add("--prop");
-            psi.ArgumentList.Add($"{kv.Name}={kv.Value.GetString() ?? ""}");
+            psi.ArgumentList.Add($"{kv.Name}={PropValueForArgv(kv.Name, kv.Value.GetString() ?? "")}");
         }
     }
+
+    /// <summary>
+    /// CONSISTENCY(text-escape-boundary): props reach this server as JSON, where
+    /// a backslash is already the final character the caller wants. The child CLI
+    /// resolves C-escapes in text-valued props, so handing the value over bare
+    /// resolves it a second time — a shape whose text is the path C:\temp\new.docx
+    /// came out as "C:" + TAB + "emp" + newline + "ew.docx". /api/batch passes the
+    /// same JSON through untouched, so without this the two endpoints disagreed on
+    /// what one item means. Double the backslashes for exactly the keys the child
+    /// resolves, leaving paths, colors and numbers alone.
+    /// </summary>
+    private static string PropValueForArgv(string key, string value)
+        => OfficeCli.CommandBuilder.KeyTakesCEscapes(key) ? TextEscape.Protect(value) : value;
 
     /// <summary>
     /// Append the shared insert-position hints (--index / --after / --before)
