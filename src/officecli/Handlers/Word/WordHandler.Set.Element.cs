@@ -1569,46 +1569,46 @@ public partial class WordHandler
                 case "framepr.w":
                 case "framepr.h":
                 {
-                    // OOXML w:framePr/@w:w and @w:h are ST_TwipsMeasure
-                    // (unsigned int, MaxInclusive=31680). SDK Width is
-                    // StringValue and Height is UInt32Value, but the generic
-                    // TypedAttributeFallback below sets Width as a raw string
-                    // so "auto" or oversized integers slip through and Word
-                    // 422s. Validate explicitly and mirror Add.Text.cs.
-                    if (!uint.TryParse(value, System.Globalization.NumberStyles.Integer,
-                            System.Globalization.CultureInfo.InvariantCulture, out var fpUInt)
-                        || fpUInt > 31680)
-                        throw new ArgumentException($"Invalid '{key}' value: '{value}'. Must be a non-negative integer 0..31680 (twips, ST_TwipsMeasure).");
+                    // OOXML w:framePr/@w:w and @w:h are ST_TwipsMeasure (unsigned,
+                    // MaxInclusive=31680). CONSISTENCY(length-units): accept pt/cm/in
+                    // (bare = twips) via SpacingConverter, then enforce the bound on
+                    // the resolved twips. Mirrors Add.Text.cs FrameTwips.
+                    uint fpUInt;
+                    try { fpUInt = OfficeCli.Core.SpacingConverter.ParseWordSpacing(value); }
+                    catch (ArgumentException) { throw new ArgumentException($"Invalid '{key}' value: '{value}'. Must resolve to a twips length (bare number, or a pt/cm/in value)."); }
+                    if (fpUInt > 31680)
+                        throw new ArgumentException($"Invalid '{key}' value: '{value}'. Must resolve to 0..31680 twips (bare number, or a pt/cm/in length).");
                     var fp = pProps.FrameProperties ?? (pProps.FrameProperties = new FrameProperties());
-                    if (k == "framepr.w") fp.Width = value;
+                    if (k == "framepr.w") fp.Width = fpUInt.ToString();
                     else fp.Height = fpUInt;
                     break;
                 }
                 case "framepr.x":
                 case "framepr.y":
                 {
-                    // ST_SignedTwipsMeasure: -31680 <= v <= 31680. SDK X/Y are
-                    // StringValue → TypedAttributeFallback passes anything.
-                    if (!int.TryParse(value, System.Globalization.NumberStyles.Integer,
-                            System.Globalization.CultureInfo.InvariantCulture, out var fpSigned)
-                        || fpSigned < -31680 || fpSigned > 31680)
-                        throw new ArgumentException($"Invalid '{key}' value: '{value}'. Must be a signed integer -31680..31680 (twips, ST_SignedTwipsMeasure).");
+                    // ST_SignedTwipsMeasure: -31680 <= v <= 31680.
+                    int fpSigned;
+                    try { fpSigned = OfficeCli.Core.SpacingConverter.ParseWordSpacingSigned(value); }
+                    catch (ArgumentException) { throw new ArgumentException($"Invalid '{key}' value: '{value}'. Must resolve to a twips length (bare number, or a pt/cm/in value)."); }
+                    if (fpSigned < -31680 || fpSigned > 31680)
+                        throw new ArgumentException($"Invalid '{key}' value: '{value}'. Must resolve to -31680..31680 twips (bare number, or a pt/cm/in length).");
                     var fp = pProps.FrameProperties ?? (pProps.FrameProperties = new FrameProperties());
-                    if (k == "framepr.x") fp.X = value;
-                    else fp.Y = value;
+                    if (k == "framepr.x") fp.X = fpSigned.ToString();
+                    else fp.Y = fpSigned.ToString();
                     break;
                 }
                 case "framepr.hspace":
                 case "framepr.vspace":
                 {
                     // ST_TwipsMeasure unsigned, MaxInclusive=31680.
-                    if (!uint.TryParse(value, System.Globalization.NumberStyles.Integer,
-                            System.Globalization.CultureInfo.InvariantCulture, out var fpSp)
-                        || fpSp > 31680)
-                        throw new ArgumentException($"Invalid '{key}' value: '{value}'. Must be a non-negative integer 0..31680 (twips, ST_TwipsMeasure).");
+                    uint fpSp;
+                    try { fpSp = OfficeCli.Core.SpacingConverter.ParseWordSpacing(value); }
+                    catch (ArgumentException) { throw new ArgumentException($"Invalid '{key}' value: '{value}'. Must resolve to a twips length (bare number, or a pt/cm/in value)."); }
+                    if (fpSp > 31680)
+                        throw new ArgumentException($"Invalid '{key}' value: '{value}'. Must resolve to 0..31680 twips (bare number, or a pt/cm/in length).");
                     var fp = pProps.FrameProperties ?? (pProps.FrameProperties = new FrameProperties());
-                    if (k == "framepr.hspace") fp.HorizontalSpace = value;
-                    else fp.VerticalSpace = value;
+                    if (k == "framepr.hspace") fp.HorizontalSpace = fpSp.ToString();
+                    else fp.VerticalSpace = fpSp.ToString();
                     break;
                 }
                 case "framepr.wrap":
@@ -2663,7 +2663,7 @@ public partial class WordHandler
                     if (!string.IsNullOrEmpty(value))
                         trPr.AppendChild(new TableCellSpacing
                         {
-                            Width = ParseHelpers.SafeParseUint(value, "cellspacing").ToString(),
+                            Width = OfficeCli.Core.SpacingConverter.ParseWordSpacing(value).ToString(),
                             Type = TableWidthUnitValues.Dxa
                         });
                     break;
@@ -2854,12 +2854,14 @@ public partial class WordHandler
                     // BUG-DUMP-R34-TBLIND: honour a pct-typed indent ("2%") so it
                     // round-trips as <w:tblInd w:type="pct"> rather than collapsing
                     // to dxa twips (which shifts the whole table horizontally).
+                    // CONSISTENCY(length-units): non-pct indent accepts pt/cm/in
+                    // (bare = twips) via SpacingConverter, matching Add + tc padding.
                     tblPr.TableIndentation = value.TrimEnd().EndsWith("%", StringComparison.Ordinal)
                         ? new TableIndentation { Width = (int)Math.Round(ParseHelpers.SafeParseDouble(value.TrimEnd().TrimEnd('%'), "indent") * 50), Type = TableWidthUnitValues.Pct }
-                        : new TableIndentation { Width = ParseHelpers.SafeParseInt(value, "indent"), Type = TableWidthUnitValues.Dxa };
+                        : new TableIndentation { Width = OfficeCli.Core.SpacingConverter.ParseWordSpacingSigned(value), Type = TableWidthUnitValues.Dxa };
                     break;
                 case "cellspacing":
-                    tblPr.TableCellSpacing = new TableCellSpacing { Width = ParseHelpers.SafeParseUint(value, "cellspacing").ToString(), Type = TableWidthUnitValues.Dxa };
+                    tblPr.TableCellSpacing = new TableCellSpacing { Width = OfficeCli.Core.SpacingConverter.ParseWordSpacing(value).ToString(), Type = TableWidthUnitValues.Dxa };
                     break;
                 case "layout":
                     tblPr.TableLayout = new TableLayout
