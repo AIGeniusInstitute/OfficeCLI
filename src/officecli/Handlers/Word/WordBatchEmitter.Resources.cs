@@ -3767,6 +3767,23 @@ public static partial class WordBatchEmitter
         if (depth > StyleDecompMaxDepth) return false;
         if (!s_nsToPrefix.TryGetValue(el.Name.NamespaceName, out var prefix))
             return false; // unknown element namespace → residue
+        // BUG-DUMP-STYLE-TCPR: a table style's direct <w:tcPr><w:tcBorders> has
+        // no typed-add round-trip — the generic add resolves `add w:tcBorders`
+        // under a style's <w:tcPr> to an OpenXmlUnknownElement (the SDK's
+        // style-context tcPr rejects it), so the decomposed batch replayed as
+        // "Unknown element type 'w:tcBorders'". w:tcBorders passes every static
+        // residue check below (known w: namespace, no text, no rel), so nothing
+        // else catches it. Treat it as residue → the recursion unwinds to
+        // TryDecomposeStyleChildren returning null → the caller ships the whole
+        // <w:style> verbatim via raw-set (the safety net + this style's original
+        // pre-decomposition behavior). Everything the generic add CAN rebuild in
+        // a style context (tblPr/tblCellMar, tblStylePr/rPr, pPr, …) still
+        // decomposes — verified by RecursiveStyleDecompTests. Scoped to the one
+        // proven-unreconstructable element; siblings that later prove to fail get
+        // added here the same way.
+        if (el.Name.NamespaceName == "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            && el.Name.LocalName == "tcBorders")
+            return false;
         // Direct (non-whitespace) text content has no typed `add` representation.
         foreach (var node in el.Nodes())
             if (node is System.Xml.Linq.XText t && !string.IsNullOrWhiteSpace(t.Value))
