@@ -2991,6 +2991,17 @@ public static partial class WordBatchEmitter
         "dataBinding.xpath", "dataBinding.storeItemID", "dataBinding.prefixMappings",
     };
 
+    /// <summary>Stringify a Get-canonical sdt Format value for typed emit,
+    /// lowercasing C# bool ToString() ("True"/"False" → "true"/"false"). Boolean
+    /// props (checked / placeholder) surface as CLR bools from Get; emitting the
+    /// capitalized form would split one concept into two vocabulary tokens for a
+    /// consumer that reads the dump as text. AddSdt's IsTruthy accepts either.</summary>
+    internal static string NormalizeSdtEmitValue(object v)
+    {
+        var s = v.ToString() ?? "";
+        return s is "True" or "False" ? s.ToLowerInvariant() : s;
+    }
+
     private static void EmitSdtTyped(WordHandler word, string sourcePath, string parentPath,
                                      List<BatchItem> items)
     {
@@ -3013,7 +3024,7 @@ public static partial class WordBatchEmitter
         {
             if (sdt.Format.TryGetValue(key, out var v) && v != null)
             {
-                var s = v.ToString() ?? "";
+                var s = NormalizeSdtEmitValue(v);
                 if (s.Length > 0) props[key] = s;
             }
         }
