@@ -3696,13 +3696,26 @@ public static partial class WordBatchEmitter
     {
         if (string.IsNullOrEmpty(styleXml) || !styleXml.StartsWith("<")) return null;
         System.Xml.Linq.XElement styleEl;
+        DocumentFormat.OpenXml.Wordprocessing.Style sdkStyle;
         try { styleEl = System.Xml.Linq.XElement.Parse(styleXml); }
+        catch { return null; }
+        // Parse the same <w:style> through the SDK so each child carries its
+        // schema-typed identity: a child the style context can't hold parses as
+        // OpenXmlUnknownElement, which TryEmitElementAdd treats as residue. Any
+        // parse failure → whole-part raw-set (the existing safety net).
+        try { sdkStyle = new DocumentFormat.OpenXml.Wordprocessing.Style(styleXml); }
         catch { return null; }
         var wNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
         var ops = new List<BatchItem>();
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var child in styleEl.Elements())
+        var xChildren = styleEl.Elements().ToList();
+        var sdkChildren = sdkStyle.Elements().ToList();
+        if (xChildren.Count != sdkChildren.Count) return null;
+        for (int i = 0; i < xChildren.Count; i++)
         {
+            var child = xChildren[i];
+            var sdkChild = sdkChildren[i];
+            if (child.Name.LocalName != sdkChild.LocalName) return null;
             // <w:name> is created by the shell `add style` (from the name prop);
             // skip it so it isn't added twice. Its localName is unique, so the
             // ordinals of the other children are unaffected.
@@ -3711,7 +3724,7 @@ public static partial class WordBatchEmitter
             counts.TryGetValue(child.Name.LocalName, out var c);
             counts[child.Name.LocalName] = c + 1;
             var childPath = $"{stylePath}/{child.Name.LocalName}[{c + 1}]";
-            if (!TryEmitElementAdd(child, stylePath, childPath, ops, 0))
+            if (!TryEmitElementAdd(child, sdkChild, stylePath, childPath, ops, 0))
                 return null;
         }
         return ops;
@@ -3741,16 +3754,25 @@ public static partial class WordBatchEmitter
     {
         if (string.IsNullOrEmpty(numberingXml) || !numberingXml.StartsWith("<")) return null;
         System.Xml.Linq.XElement numEl;
+        DocumentFormat.OpenXml.Wordprocessing.Numbering sdkNum;
         try { numEl = System.Xml.Linq.XElement.Parse(numberingXml); }
+        catch { return null; }
+        try { sdkNum = new DocumentFormat.OpenXml.Wordprocessing.Numbering(numberingXml); }
         catch { return null; }
         var ops = new List<BatchItem>();
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var child in numEl.Elements())
+        var xChildren = numEl.Elements().ToList();
+        var sdkChildren = sdkNum.Elements().ToList();
+        if (xChildren.Count != sdkChildren.Count) return null;
+        for (int i = 0; i < xChildren.Count; i++)
         {
+            var child = xChildren[i];
+            var sdkChild = sdkChildren[i];
+            if (child.Name.LocalName != sdkChild.LocalName) return null;
             counts.TryGetValue(child.Name.LocalName, out var c);
             counts[child.Name.LocalName] = c + 1;
             var childPath = $"/numbering/{child.Name.LocalName}[{c + 1}]";
-            if (!TryEmitElementAdd(child, "/numbering", childPath, ops, 0))
+            if (!TryEmitElementAdd(child, sdkChild, "/numbering", childPath, ops, 0))
                 return null;
         }
         return ops.Count > 0 ? ops : null;
@@ -3761,28 +3783,34 @@ public static partial class WordBatchEmitter
     // el's own resolved path (for addressing its children). Returns false on
     // residue.
     private static bool TryEmitElementAdd(
-        System.Xml.Linq.XElement el, string parentPath, string elPath,
-        List<BatchItem> ops, int depth)
+        System.Xml.Linq.XElement el, DocumentFormat.OpenXml.OpenXmlElement sdkEl,
+        string parentPath, string elPath, List<BatchItem> ops, int depth)
     {
         if (depth > StyleDecompMaxDepth) return false;
         if (!s_nsToPrefix.TryGetValue(el.Name.NamespaceName, out var prefix))
             return false; // unknown element namespace → residue
-        // BUG-DUMP-STYLE-TCPR: a table style's direct <w:tcPr><w:tcBorders> has
-        // no typed-add round-trip — the generic add resolves `add w:tcBorders`
-        // under a style's <w:tcPr> to an OpenXmlUnknownElement (the SDK's
-        // style-context tcPr rejects it), so the decomposed batch replayed as
-        // "Unknown element type 'w:tcBorders'". w:tcBorders passes every static
-        // residue check below (known w: namespace, no text, no rel), so nothing
-        // else catches it. Treat it as residue → the recursion unwinds to
+        // BUG-DUMP-STYLE-TCPR (generalized): an element is only decomposable into
+        // a typed `add` if the generic add can REBUILD it in this parent context.
+        // The authority on that is the SDK schema itself: TryCreateTypedElement
+        // (the generic-add builder) returns null exactly when the element resolves
+        // to an OpenXmlUnknownElement under the reconstructed parent, replaying as
+        // "Unknown element type 'w:X'". We get the same verdict for free: `sdkEl`
+        // is the SAME element as `el`, parsed by the SDK under its real (typed)
+        // parent — a style-context <w:tcPr> is StyleTableCellProperties, a
+        // style-context <w:rPr> is StyleRunProperties, and each rejects the
+        // children the flat-XML tree carries (w:tcBorders under the former,
+        // w:rtl under the latter) by parsing them as OpenXmlUnknownElement.
+        // Treat any such element as residue → the recursion unwinds to
         // TryDecomposeStyleChildren returning null → the caller ships the whole
-        // <w:style> verbatim via raw-set (the safety net + this style's original
-        // pre-decomposition behavior). Everything the generic add CAN rebuild in
-        // a style context (tblPr/tblCellMar, tblStylePr/rPr, pPr, …) still
-        // decomposes — verified by RecursiveStyleDecompTests. Scoped to the one
-        // proven-unreconstructable element; siblings that later prove to fail get
-        // added here the same way.
-        if (el.Name.NamespaceName == "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-            && el.Name.LocalName == "tcBorders")
+        // <w:style> verbatim via raw-set. This replaces the former per-element
+        // (w:tcBorders-only) block: instead of listing each unreconstructable
+        // element as it is discovered (w:tcBorders, then w:rtl, then the next
+        // RTL/CJK style child), the SDK's own type table draws the line once, so
+        // no future style child of this class silently breaks replay. Everything
+        // the generic add CAN rebuild in a style context (tblPr/tblCellMar,
+        // tblStylePr/rPr, pPr, …) parses as a typed element and still decomposes
+        // — verified by RecursiveStyleDecompTests + StyleDecompUnknownProbeTests.
+        if (sdkEl is DocumentFormat.OpenXml.OpenXmlUnknownElement)
             return false;
         // Direct (non-whitespace) text content has no typed `add` representation.
         foreach (var node in el.Nodes())
@@ -3816,13 +3844,26 @@ public static partial class WordBatchEmitter
             Type = $"{prefix}:{el.Name.LocalName}",
             Props = props
         });
+        // Walk the flat-XML children in lockstep with the SDK-parsed children so
+        // each recursion carries the SDK's schema verdict for that node. Both
+        // enumerations exclude text/whitespace and preserve source order (unknown
+        // elements included), so they align 1:1. Any desync — different length or
+        // a mismatched localName at the same slot — means the SDK parsed the
+        // subtree differently than the flat XML implies; treat that as residue
+        // (whole-part raw-set) rather than emit a possibly-wrong add.
+        var xChildren = el.Elements().ToList();
+        var sdkChildren = sdkEl.Elements().ToList();
+        if (xChildren.Count != sdkChildren.Count) return false;
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var child in el.Elements())
+        for (int i = 0; i < xChildren.Count; i++)
         {
+            var child = xChildren[i];
+            var sdkChild = sdkChildren[i];
+            if (child.Name.LocalName != sdkChild.LocalName) return false;
             counts.TryGetValue(child.Name.LocalName, out var c);
             counts[child.Name.LocalName] = c + 1;
             var childPath = $"{elPath}/{child.Name.LocalName}[{c + 1}]";
-            if (!TryEmitElementAdd(child, elPath, childPath, ops, depth + 1))
+            if (!TryEmitElementAdd(child, sdkChild, elPath, childPath, ops, depth + 1))
                 return false;
         }
         return true;
