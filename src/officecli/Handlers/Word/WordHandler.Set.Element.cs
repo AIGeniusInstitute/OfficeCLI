@@ -180,6 +180,62 @@ public partial class WordHandler
                         ?.GetFirstChild<ShowingPlaceholder>();
                     plcHdr?.Remove();
                     break;
+                // P1 (sdt post-creation mutation): checkbox state, list choices,
+                // combo/dropdown/date current values, and placeholder markers are
+                // all settable after the control exists. `type` stays immutable
+                // (schema set:false) — changing the content-type element would
+                // corrupt the control; recreate it instead. Wrong-control-type
+                // targets throw a clear error rather than silently no-op.
+                case "checked":
+                    SetSdtChecked(element, sdtProps, IsTruthy(value));
+                    break;
+                case "items" or "choices":
+                    SetSdtItems(sdtProps, value);
+                    break;
+                case "dropdown.lastvalue":
+                    RequireSdtType<SdtContentDropDownList>(sdtProps, "dropDown.lastValue", "dropdown").LastValue = value;
+                    break;
+                case "combobox.lastvalue":
+                    RequireSdtType<SdtContentComboBox>(sdtProps, "comboBox.lastValue", "combobox").LastValue = value;
+                    break;
+                case "format":
+                    RequireSdtType<SdtContentDate>(sdtProps, "format", "date").DateFormat = new DateFormat { Val = value };
+                    break;
+                case "date.fulldate":
+                    if (!DateTime.TryParse(value, System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal,
+                            out var fdVal))
+                        throw new ArgumentException($"Invalid date.fullDate '{value}'. Expected ISO-8601 (e.g. 2026-01-01T00:00:00Z).");
+                    RequireSdtType<SdtContentDate>(sdtProps, "date.fullDate", "date").FullDate = fdVal;
+                    break;
+                case "date.calendar":
+                    RequireSdtType<SdtContentDate>(sdtProps, "date.calendar", "date").Calendar =
+                        new Calendar { Val = new EnumValue<CalendarValues>(new CalendarValues(value)) };
+                    break;
+                case "date.lid":
+                    RequireSdtType<SdtContentDate>(sdtProps, "date.lid", "date").LanguageId = new LanguageId { Val = value };
+                    break;
+                case "date.storemappeddataas":
+                    RequireSdtType<SdtContentDate>(sdtProps, "date.storeMappedDataAs", "date").SdtDateMappingType =
+                        new SdtDateMappingType { Val = new EnumValue<DateFormatValues>(new DateFormatValues(value)) };
+                    break;
+                case "placeholder":
+                    var existingPlc = sdtProps.GetFirstChild<ShowingPlaceholder>();
+                    if (IsTruthy(value))
+                    {
+                        if (existingPlc == null) InsertSdtPropSchemaOrdered(sdtProps, new ShowingPlaceholder());
+                    }
+                    else existingPlc?.Remove();
+                    break;
+                case "placeholdertext":
+                    var existingDocPart = sdtProps.GetFirstChild<SdtPlaceholder>();
+                    if (string.IsNullOrEmpty(value)) existingDocPart?.Remove();
+                    else if (existingDocPart != null)
+                        existingDocPart.DocPartReference = new DocPartReference { Val = value };
+                    else
+                        InsertSdtPropSchemaOrdered(sdtProps,
+                            new SdtPlaceholder { DocPartReference = new DocPartReference { Val = value } });
+                    break;
                 default:
                     unsupported.Add(key);
                     break;
@@ -187,6 +243,69 @@ public partial class WordHandler
         }
         SaveDoc();
         return unsupported;
+    }
+
+    // P1 sdt helpers. Mirror the Add-side builders (ApplySdtExtraProps /
+    // BuildSdtCheckBox / ParseSdtItems in WordHandler.Add.Misc.cs) so Set and
+    // Add produce the identical OOXML shape; the difference is mutate-in-place
+    // vs build-fresh.
+
+    /// <summary>Fetch the content-type child that a typed prop requires; throw a
+    /// clear error when the control is a different variant (type is immutable).</summary>
+    private static T RequireSdtType<T>(SdtProperties sdtProps, string prop, string typeName)
+        where T : OpenXmlElement
+    {
+        return sdtProps.GetFirstChild<T>()
+            ?? throw new ArgumentException(
+                $"'{prop}' applies only to a {typeName} content control; this control is a different type " +
+                "(type cannot be changed after creation — recreate the control instead).");
+    }
+
+    /// <summary>Insert an sdtPr child before the type-content element per CT_SdtPr
+    /// schema order (placeholder / showingPlcHdr / dataBinding precede the type).</summary>
+    private static void InsertSdtPropSchemaOrdered(SdtProperties sdtProps, OpenXmlElement el)
+    {
+        var typeElement = sdtProps.LastChild;
+        bool typeIsContent = typeElement is SdtContentDate or SdtContentComboBox
+            or SdtContentDropDownList or SdtContentText
+            or SdtContentGroup or SdtContentPicture
+            or DocumentFormat.OpenXml.Office2010.Word.SdtContentCheckBox;
+        if (typeIsContent) sdtProps.InsertBefore(el, typeElement);
+        else sdtProps.AppendChild(el);
+    }
+
+    /// <summary>Flip a checkbox control's checked flag and repaint its glyph run
+    /// (☒ checked / ☐ unchecked) so `view text` and Word both reflect the state.</summary>
+    private void SetSdtChecked(OpenXmlElement element, SdtProperties sdtProps, bool isChecked)
+    {
+        var checkBox = RequireSdtType<DocumentFormat.OpenXml.Office2010.Word.SdtContentCheckBox>(
+            sdtProps, "checked", "checkbox");
+        checkBox.Checked ??= new DocumentFormat.OpenXml.Office2010.Word.Checked();
+        checkBox.Checked.Val = isChecked
+            ? DocumentFormat.OpenXml.Office2010.Word.OnOffValues.One
+            : DocumentFormat.OpenXml.Office2010.Word.OnOffValues.Zero;
+
+        // Repaint the box glyph only when the content run currently holds a box
+        // glyph (☒/☐) — never clobber user-typed content beside the checkbox.
+        var glyph = isChecked ? "☒" : "☐";
+        var content = (OpenXmlElement?)(element as SdtBlock)?.SdtContentBlock
+            ?? (element as SdtRun)?.SdtContentRun;
+        foreach (var t in content?.Descendants<Text>() ?? Enumerable.Empty<Text>())
+            if (t.Text is "☒" or "☐") t.Text = glyph;
+    }
+
+    /// <summary>Replace the list choices on a dropdown/combobox control.</summary>
+    private void SetSdtItems(SdtProperties sdtProps, string items)
+    {
+        OpenXmlElement list = (OpenXmlElement?)sdtProps.GetFirstChild<SdtContentDropDownList>()
+            ?? sdtProps.GetFirstChild<SdtContentComboBox>()
+            ?? throw new ArgumentException(
+                "'items' applies only to a dropdown or combobox content control; this control is a different type " +
+                "(type cannot be changed after creation — recreate the control instead).");
+        // LastValue (a combo/dropdown attribute) lives on the list element, not a
+        // child; RemoveAllChildren clears only the ListItem set, preserving it.
+        foreach (var li in list.Elements<ListItem>().ToList()) li.Remove();
+        foreach (var li in ParseSdtItems(items)) list.AppendChild(li);
     }
 
     private List<string> SetElementRun(Run run, Dictionary<string, string> properties)
