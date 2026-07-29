@@ -2978,6 +2978,10 @@ public static partial class WordBatchEmitter
     internal static readonly string[] SdtTypedEmitKeys =
     {
         "type", "alias", "tag", "items", "format", "lock",
+        // checkbox checked state — a bare-glyph checkbox now round-trips through
+        // the typed path (see HasSpecialSdtTypeMarker); without this the state
+        // would silently reset to unchecked on a dump->batch cycle.
+        "checked",
         "placeholder", "placeholderText",
         "date.fullDate", "date.calendar", "date.lid", "date.storeMappedDataAs",
         "comboBox.lastValue", "dropDown.lastValue",
@@ -3045,14 +3049,16 @@ public static partial class WordBatchEmitter
         => System.Text.RegularExpressions.Regex.IsMatch(
                sdtXml, @"<[A-Za-z0-9]+:repeatingSection(Item)?[ />]")
         || System.Text.RegularExpressions.Regex.IsMatch(
-               sdtXml, @"<w:docPartObj[ />]")
-        // BUG-DUMP-SDT-CHECKBOX: a <w14:checkbox> content control's sdtPr type
-        // marker (+ its checked / checkedState / uncheckedState) is not expressible
-        // through the typed `add sdt text=` path, so without recognising it here the
-        // checkbox SDT round-tripped as a plain rich-text SDT — losing the checkbox
-        // type and its checked state. Match any namespace prefix (w14/w15/…).
-        || System.Text.RegularExpressions.Regex.IsMatch(
-               sdtXml, @"<[A-Za-z0-9]+:checkbox[ />]");
+               sdtXml, @"<w:docPartObj[ />]");
+    // A <w14:checkbox> content control is no longer forced to raw-set here: the
+    // typed `add sdt --prop type=checkbox --prop checked=X` path now rebuilds the
+    // sdtPr marker (BuildSdtCheckBox) AND the box glyph, and `checked` rides the
+    // typed-emit whitelist (SdtTypedEmitKeys), so a checkbox whose content is the
+    // bare glyph round-trips through the typed path. A checkbox carrying richer
+    // content (a formatted glyph run with <w:rPr>, extra runs, nested markers,
+    // …) still returns rich from the general IsRich*Sdt checks below and stays
+    // raw-set for fidelity. (Historically checkbox short-circuited to raw here
+    // because the typed add could not reproduce the type or checked state.)
 
     private static bool IsRichBlockSdt(string sdtXml)
     {
