@@ -427,7 +427,14 @@ public partial class WordHandler
             var firstName = hfParts[0].Name.ToLowerInvariant();
             if ((firstName == "header" || firstName == "footer") && hfParts.Count == 1)
             {
-                SetHeaderFooter(firstName, (hfParts[0].Index ?? 1) - 1, properties, unsupported);
+                // last() resolves to the LAST part by creation order (mirrors
+                // get); otherwise set /header[last()] silently wrote into the
+                // FIRST header (Index == null → 0), losing content.
+                int hfCount = (firstName == "header"
+                    ? _doc.MainDocumentPart?.HeaderParts.Count()
+                    : _doc.MainDocumentPart?.FooterParts.Count()) ?? 0;
+                int hfIdx = hfParts[0].StringIndex == "last()" ? hfCount - 1 : (hfParts[0].Index ?? 1) - 1;
+                SetHeaderFooter(firstName, hfIdx, properties, unsupported);
                 return unsupported;
             }
         }

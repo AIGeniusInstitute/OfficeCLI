@@ -1200,12 +1200,24 @@ public partial class WordHandler
             }
         }
 
+        // Resolve the 0-based part index for a positional header/footer segment.
+        // last() must map to the LAST part by enumeration (creation) order, the
+        // same as /body/p[last()] — without this it fell through to
+        // (Index ?? 1) - 1 = 0 and silently resolved /header[last()] to the
+        // FIRST header, so a `set /header[last()]` wrote into the wrong header
+        // (content loss when several headers of different types exist).
+        int PartIndex(int count) => first.StringIndex == "last()" ? count - 1 : (first.Index ?? 1) - 1;
+
         OpenXmlElement? current = first.Name.ToLowerInvariant() switch
         {
             "body" => _doc.MainDocumentPart?.Document?.Body,
             "styles" => _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles,
-            "header" => _doc.MainDocumentPart?.HeaderParts.ElementAtOrDefault((first.Index ?? 1) - 1)?.Header,
-            "footer" => _doc.MainDocumentPart?.FooterParts.ElementAtOrDefault((first.Index ?? 1) - 1)?.Footer,
+            "header" => _doc.MainDocumentPart?.HeaderParts is { } hps
+                ? hps.ToList() is var hl && hl.Count > 0 ? hl.ElementAtOrDefault(PartIndex(hl.Count))?.Header : null
+                : null,
+            "footer" => _doc.MainDocumentPart?.FooterParts is { } fps
+                ? fps.ToList() is var fl && fl.Count > 0 ? fl.ElementAtOrDefault(PartIndex(fl.Count))?.Footer : null
+                : null,
             "numbering" => _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering,
             "settings" => _doc.MainDocumentPart?.DocumentSettingsPart?.Settings,
             "comments" => _doc.MainDocumentPart?.WordprocessingCommentsPart?.Comments,
