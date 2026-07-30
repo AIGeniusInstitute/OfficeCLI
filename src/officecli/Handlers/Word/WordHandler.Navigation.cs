@@ -898,6 +898,15 @@ public partial class WordHandler
     // Get(/body/p[@paraId]) per paragraph, so that scan made dump O(n²).
     private Dictionary<OpenXmlElement, Dictionary<string, Paragraph>>? _bodyParaByIdCache;
 
+    // Per-scope-root bookmark w:id → BookmarkStart, built lazily by
+    // FindBookmarkStartById. ResolveBookmarkEndName / IsContentSpanBookmark(end)
+    // resolved a standalone <w:bookmarkEnd> to its paired start via
+    // body.Descendants<BookmarkStart>().FirstOrDefault(id) — O(bookmarks) per
+    // call. dump emits one such lookup per bookmarkEnd, so a document with N
+    // bookmarks cost O(N²) (a 6940-bookmark FedRAMP SSP spent tens of seconds
+    // here alone). Keyed by scope root (Body) so the map is built once.
+    private Dictionary<OpenXmlElement, Dictionary<string, BookmarkStart>>? _bookmarkStartByIdCache;
+
     // Per-container child-index caches for the SAME O(n²) shape the body caches
     // above fix, but one level down: resolving /<para>/r[K], /<tbl>/tr[K] and
     // /<tr>/tc[K] for K=1..M re-materialized the (filtered/flattened) child list
@@ -920,6 +929,7 @@ public partial class WordHandler
         _bodyChildIndexCache.Clear();
         _owningSectionCache = null;
         _bodyParaByIdCache = null;
+        _bookmarkStartByIdCache = null;
         ClearNavChildCaches();
     }
 
