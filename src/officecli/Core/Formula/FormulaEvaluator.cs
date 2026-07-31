@@ -872,7 +872,16 @@ internal partial class FormulaEvaluator
     {
         if (r.IsBlank) { val = 0; return true; }
         if (r.IsString)
-            return double.TryParse(r.StringValue, NumberStyles.Any, CultureInfo.InvariantCulture, out val);
+        {
+            if (double.TryParse(r.StringValue, NumberStyles.Any, CultureInfo.InvariantCulture, out val))
+                return true;
+            // Excel coerces date/time-formatted text to its serial in arithmetic
+            // (e.g. "2024-08-01" - "2024-08-01" = 0), so fall back to date parsing
+            // when the text isn't a plain number.
+            if (DateTime.TryParse(r.StringValue, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
+            { val = dt.ToOADate(); return true; }
+            return false;
+        }
         val = r.AsNumber();
         return true;
     }
